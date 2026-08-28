@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Marketplace Only",
+    "slug": "marketplace-only",
+    "scheme": "marketplaceonly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.personal.marketplaceonly",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Marketplace may use the camera when you add photos to a listing.",
+        "NSMicrophoneUsageDescription": "Marketplace may use the microphone if you record video for a listing.",
+        "NSPhotoLibraryUsageDescription": "Marketplace may access your photos when you add them to a listing.",
+        "NSPhotoLibraryAddUsageDescription": "Marketplace may save photos when you use listing features."
+      }
+    },
+    "android": {
+      "package": "com.personal.marketplaceonly",
+      "adaptiveIcon": {
+        "backgroundColor": "#1877F2",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "marketplaceBaseUrl": "https://www.facebook.com/marketplace/"
+    },
+    "plugins": [
+      "expo-web-browser",
+      "expo-dev-client",
+      "@preeternal/react-native-cookie-manager",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1877F2",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180
+        }
+      ]
+    ]
+  }
+}
