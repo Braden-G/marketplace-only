@@ -10,6 +10,7 @@ type Props = {
   onHome: () => void;
   onSearch: () => void;
   onReload: () => void;
+  onSettings: () => void;
 };
 
 function ToolButton({
@@ -50,6 +51,7 @@ export function Toolbar({
   onHome,
   onSearch,
   onReload,
+  onSettings,
 }: Props) {
   return (
     <View style={[styles.bar, { backgroundColor: theme.chrome, borderTopColor: theme.border }]}>
@@ -58,6 +60,7 @@ export function Toolbar({
       <ToolButton label="⌂" accessibilityLabel="Marketplace home" theme={theme} onPress={onHome} />
       <ToolButton label="⌕" accessibilityLabel="Searches" theme={theme} onPress={onSearch} />
       <ToolButton label="↻" accessibilityLabel="Reload" theme={theme} onPress={onReload} />
+      <ToolButton label="⚙" accessibilityLabel="Settings" theme={theme} onPress={onSettings} />
     </View>
   );
 }

@@ -6,9 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Pressable,
   StyleSheet,
-  Text,
   useColorScheme,
   View,
 } from 'react-native';
@@ -18,6 +16,7 @@ import type {
   ShouldStartLoadRequest,
   WebViewErrorEvent,
   WebViewHttpErrorEvent,
+  WebViewMessageEvent,
   WebViewNavigation,
   WebViewOpenWindowEvent,
 } from 'react-native-webview/lib/WebViewTypes';
@@ -27,13 +26,18 @@ import { SearchSheet } from './components/SearchSheet';
 import { SettingsScreen } from './components/SettingsScreen';
 import { Toolbar } from './components/Toolbar';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { APP_NAME, MARKETPLACE_HOME } from './constants';
+import { MARKETPLACE_HOME } from './constants';
 import { createMarketplaceSearch, MarketplaceSearch } from './models/MarketplaceSearch';
-import { classifyUrl, shouldAllowInWebView } from './navigation/urlValidator';
+import { classifyUrl, isExplicitNewsFeedUrl, isFacebookPhotoViewer, shouldAllowInWebView } from './navigation/urlValidator';
 import { getLogEntries, logNavigation, subscribeToLogs } from './services/logger';
 import {
   buildMarketplaceSearchUrl,
+  isBareMarketplaceHome,
+  isMarketplaceItemUrl,
   isMarketplaceSearchUrl,
+  locationSlugFromMarketplaceUrl,
+  marketplaceLandingUrl,
+  marketplaceSearchNavigationScript,
   queryFromMarketplaceUrl,
 } from './services/marketplaceUrlBuilder';
 import { clearFacebookWebsiteData } from './services/websiteData';
@@ -44,6 +48,7 @@ import {
   removeSavedSearch,
   saveSearch,
 } from './storage/searchStore';
+import { loadLocationSlug, saveLocationSlug } from './storage/locationSlug';
 import { AppearanceSetting, AppSettings, loadSettings, saveSettings } from './storage/settings';
 import { getTheme, resolveScheme } from './theme';
 
@@ -53,6 +58,9 @@ export default function App() {
   const systemScheme = useColorScheme();
   const webViewRef = useRef<WebView>(null);
   const lastMarketplaceUrl = useRef(MARKETPLACE_HOME);
+  const marketplaceStack = useRef<string[]>([MARKETPLACE_HOME]);
+  const currentUrlRef = useRef(MARKETPLACE_HOME);
+  const locationSlugRef = useRef<string | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [sourceUri, setSourceUri] = useState(MARKETPLACE_HOME);
   const [webKey, setWebKey] = useState(0);
@@ -74,6 +82,11 @@ export default function App() {
     loadSettings().then(setSettings);
     loadSavedSearches().then(setSavedSearches);
     loadRecentSearches().then(setRecentSearches);
+    loadLocationSlug().then((slug) => {
+      if (slug) {
+        locationSlugRef.current = slug;
+      }
+    });
   }, []);
 
   useEffect(() => subscribeToLogs(() => setLogs(getLogEntries())), []);
@@ -105,6 +118,19 @@ export default function App() {
     return getTheme(resolveScheme(appearance, systemScheme));
   }, [settings?.appearance, systemScheme]);
 
+  const rememberSlug = useCallback((url: string) => {
+    const slug = locationSlugFromMarketplaceUrl(url);
+    if (!slug || slug === locationSlugRef.current) {
+      return;
+    }
+    locationSlugRef.current = slug;
+    saveLocationSlug(slug).catch(() => undefined);
+  }, []);
+
+  const cityLandingUrl = useCallback((fromUrl?: string) => {
+    return marketplaceLandingUrl(fromUrl, locationSlugRef.current);
+  }, []);
+
   const rememberHost = useCallback((host: string | null) => {
     if (!host) {
       return;
@@ -121,11 +147,64 @@ export default function App() {
     setSourceUri(url);
   }, []);
 
+  const setMarketplaceStack = useCallback((stack: string[]) => {
+    marketplaceStack.current = stack;
+    lastMarketplaceUrl.current = stack[stack.length - 1] ?? MARKETPLACE_HOME;
+    setNav((prev) => ({ ...prev, canGoBack: stack.length > 1 }));
+  }, []);
+
+  const pushMarketplaceHistory = useCallback(
+    (url: string) => {
+      if (classifyUrl(url).kind !== 'marketplace') {
+        return;
+      }
+      const stack = marketplaceStack.current;
+      const last = stack[stack.length - 1];
+      if (last === url) {
+        return;
+      }
+      // Bare /marketplace/ is an unstable hop: Facebook often SPA-routes it to the news feed.
+      if (isBareMarketplaceHome(url)) {
+        return;
+      }
+      if (last && isMarketplaceSearchUrl(last) && isMarketplaceSearchUrl(url)) {
+        setMarketplaceStack([...stack.slice(0, -1), url]);
+        return;
+      }
+      setMarketplaceStack([...stack, url].slice(-40));
+    },
+    [setMarketplaceStack],
+  );
+
   const loadMarketplaceHome = useCallback(() => {
-    lastMarketplaceUrl.current = MARKETPLACE_HOME;
-    loadUrl(MARKETPLACE_HOME, true);
-    logNavigation('Load Marketplace home', { url: MARKETPLACE_HOME, kind: 'marketplace' });
-  }, [loadUrl]);
+    const url = cityLandingUrl(lastMarketplaceUrl.current);
+    setMarketplaceStack([url]);
+    loadUrl(url, true);
+    logNavigation('Load Marketplace home', { url, kind: 'marketplace' });
+  }, [cityLandingUrl, loadUrl, setMarketplaceStack]);
+
+  const goBackMarketplace = useCallback(() => {
+    const current = currentUrlRef.current;
+    const stack = marketplaceStack.current;
+    const top = stack[stack.length - 1] ?? '';
+    if (isMarketplaceSearchUrl(current) || isMarketplaceSearchUrl(top)) {
+      const landing = cityLandingUrl(current || top);
+      setMarketplaceStack([landing]);
+      loadUrl(landing, false);
+      logNavigation('Back from search to Marketplace', { url: landing, kind: 'marketplace' });
+      return;
+    }
+    if (stack.length > 1) {
+      const next = stack.slice(0, -1);
+      const previous = next[next.length - 1] ?? cityLandingUrl(current);
+      const safePrevious = isBareMarketplaceHome(previous) ? cityLandingUrl(current) : previous;
+      setMarketplaceStack([...next.slice(0, -1), safePrevious]);
+      loadUrl(safePrevious, false);
+      logNavigation('Back within Marketplace', { url: safePrevious, kind: 'marketplace' });
+      return;
+    }
+    loadMarketplaceHome();
+  }, [cityLandingUrl, loadMarketplaceHome, loadUrl, setMarketplaceStack]);
 
   const recordMarketplaceUrl = useCallback(
     async (url: string) => {
@@ -133,7 +212,12 @@ export default function App() {
       if (result.kind !== 'marketplace') {
         return;
       }
+      if (isBareMarketplaceHome(url)) {
+        return;
+      }
+      rememberSlug(url);
       lastMarketplaceUrl.current = url;
+      pushMarketplaceHistory(url);
       if (!isMarketplaceSearchUrl(url)) {
         return;
       }
@@ -145,7 +229,7 @@ export default function App() {
       });
       setRecentSearches(await addRecentSearch(search));
     },
-    [],
+    [pushMarketplaceHistory, rememberSlug],
   );
 
   const handleClassification = useCallback(
@@ -165,8 +249,22 @@ export default function App() {
       }
 
       if (result.kind === 'facebookHome') {
-        logNavigation('Redirect Facebook home to Marketplace', { url: rawUrl, kind: result.kind });
-        loadUrl(MARKETPLACE_HOME);
+        if (isFacebookPhotoViewer(rawUrl)) {
+          setCurrentKind('facebookRelated');
+          setBlocked(false);
+          return true;
+        }
+        if (isExplicitNewsFeedUrl(rawUrl)) {
+          logNavigation('Stay in Marketplace (Facebook home blocked)', { url: rawUrl, kind: result.kind });
+          return false;
+        }
+        // Bare `/` from a listing or search is usually the photo theater's first hop.
+        if (isMarketplaceItemUrl(currentUrlRef.current) || isMarketplaceSearchUrl(currentUrlRef.current)) {
+          setCurrentKind('facebookRelated');
+          setBlocked(false);
+          return true;
+        }
+        logNavigation('Stay in Marketplace (Facebook home blocked)', { url: rawUrl, kind: result.kind });
         return false;
       }
 
@@ -189,7 +287,7 @@ export default function App() {
       logNavigation('Ignored custom scheme (Facebook app not opened)', { url: rawUrl, kind: result.kind });
       return false;
     },
-    [loadUrl, rememberHost],
+    [rememberHost],
   );
 
   const onShouldStartLoadWithRequest = useCallback(
@@ -210,22 +308,43 @@ export default function App() {
 
   const onNavigationStateChange = useCallback(
     (state: WebViewNavigation) => {
+      currentUrlRef.current = state.url;
       setCurrentUrl(state.url);
       setNav((prev) => ({
         ...prev,
-        canGoBack: state.canGoBack,
-        canGoForward: state.canGoForward,
+        canGoForward: false,
         loading: state.loading,
+        canGoBack: marketplaceStack.current.length > 1 || isMarketplaceSearchUrl(state.url),
       }));
       const result = classifyUrl(state.url);
       setCurrentKind(result.kind);
       rememberHost(result.host);
+      rememberSlug(state.url);
       if (!state.loading) {
         recordMarketplaceUrl(state.url).catch(() => undefined);
       }
     },
-    [recordMarketplaceUrl, rememberHost],
+    [recordMarketplaceUrl, rememberHost, rememberSlug],
   );
+
+  const onWebMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data) as { type?: string; slug?: string };
+        if (data?.type === 'mp-slug' && data.slug) {
+          rememberSlug(`https://www.facebook.com/marketplace/${data.slug}/`);
+        }
+      } catch {
+        return;
+      }
+    },
+    [rememberSlug],
+  );
+
+  const injectLandingHint = useCallback(() => {
+    const dest = cityLandingUrl(lastMarketplaceUrl.current);
+    webViewRef.current?.injectJavaScript(`window.__mpOnlyLanding=${JSON.stringify(dest)}; true;`);
+  }, [cityLandingUrl]);
 
   const onError = useCallback((event: WebViewErrorEvent) => {
     const description = event.nativeEvent.description || 'Marketplace could not be loaded.';
@@ -287,10 +406,30 @@ export default function App() {
 
   const openSearch = useCallback((search: MarketplaceSearch) => {
     setSearchOpen(false);
-    loadUrl(search.url);
+    const slug =
+      locationSlugFromMarketplaceUrl(search.url) ??
+      locationSlugFromMarketplaceUrl(currentUrl) ??
+      locationSlugFromMarketplaceUrl(lastMarketplaceUrl.current) ??
+      locationSlugRef.current;
+    if (search.query && slug) {
+      const url = buildMarketplaceSearchUrl(search.query, { locationSlug: slug });
+      pushMarketplaceHistory(url);
+      loadUrl(url, false);
+      addRecentSearch({ ...search, url }).then(setRecentSearches);
+      logNavigation('Open Marketplace search', { url, kind: 'marketplace' });
+      return;
+    }
+    if (search.query) {
+      webViewRef.current?.injectJavaScript(marketplaceSearchNavigationScript(search.query, slug));
+      addRecentSearch(search).then(setRecentSearches);
+      logNavigation('Open Marketplace search in page', { kind: 'marketplace' });
+      return;
+    }
+    pushMarketplaceHistory(search.url);
+    loadUrl(search.url, false);
     addRecentSearch(search).then(setRecentSearches);
     logNavigation('Open search shortcut', { url: search.url, kind: 'marketplace' });
-  }, [loadUrl]);
+  }, [currentUrl, loadUrl, pushMarketplaceHistory]);
 
   const submitQuery = useCallback(
     (query: string) => {
@@ -338,32 +477,6 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.flex, { backgroundColor: theme.chrome }]} edges={['top', 'bottom']}>
       <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
-      <View style={[styles.header, { backgroundColor: theme.chrome, borderBottomColor: theme.border }]}>
-        <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>
-          {APP_NAME}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          onPress={() => setSettingsOpen(true)}
-          style={styles.settingsHit}
-        >
-          <Text style={[styles.settingsGlyph, { color: theme.text }]}>⚙</Text>
-        </Pressable>
-      </View>
-      {nav.loading ? (
-        <View style={[styles.progressTrack, { backgroundColor: theme.border }]}>
-          <View
-            style={[
-              styles.progressBar,
-              { width: `${Math.max(8, nav.progress * 100)}%`, backgroundColor: theme.accent },
-            ]}
-          />
-        </View>
-      ) : (
-        <View style={[styles.progressTrack, { backgroundColor: theme.chrome }]} />
-      )}
-
       <View style={styles.flex}>
         <MarketplaceWebView
           ref={webViewRef}
@@ -379,7 +492,11 @@ export default function App() {
               progress,
             }));
           }}
-          onLoadEnd={() => setNav((prev) => ({ ...prev, loading: false, progress: 1 }))}
+          onLoadEnd={() => {
+            setNav((prev) => ({ ...prev, loading: false, progress: 1 }));
+            injectLandingHint();
+          }}
+          onMessage={onWebMessage}
           onError={onError}
           onHttpError={onHttpError}
           onProcessGone={onProcessGone}
@@ -387,6 +504,17 @@ export default function App() {
             WebBrowser.openBrowserAsync(downloadUrl).catch(() => Linking.openURL(downloadUrl));
           }}
         />
+
+        {nav.loading ? (
+          <View pointerEvents="none" style={[styles.progressTrack, { backgroundColor: theme.border }]}>
+            <View
+              style={[
+                styles.progressBar,
+                { width: `${Math.max(8, nav.progress * 100)}%`, backgroundColor: theme.accent },
+              ]}
+            />
+          </View>
+        ) : null}
 
         {blocked ? (
           <MessageOverlay
@@ -470,13 +598,14 @@ export default function App() {
 
       <Toolbar
         theme={theme}
-        canGoBack={nav.canGoBack}
-        canGoForward={nav.canGoForward}
-        onBack={() => webViewRef.current?.goBack()}
+        canGoBack={nav.canGoBack || isMarketplaceSearchUrl(currentUrl)}
+        canGoForward={false}
+        onBack={goBackMarketplace}
         onForward={() => webViewRef.current?.goForward()}
         onHome={loadMarketplaceHome}
         onSearch={() => setSearchOpen(true)}
         onReload={() => webViewRef.current?.reload()}
+        onSettings={() => setSettingsOpen(true)}
       />
 
       <SearchSheet
@@ -526,28 +655,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  header: {
-    minHeight: 48,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  settingsHit: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsGlyph: {
-    fontSize: 22,
-  },
   progressTrack: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     height: 2,
   },
   progressBar: {

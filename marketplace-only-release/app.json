@@ -14,7 +14,8 @@
         "NSCameraUsageDescription": "Marketplace may use the camera when you add photos to a listing.",
         "NSMicrophoneUsageDescription": "Marketplace may use the microphone if you record video for a listing.",
         "NSPhotoLibraryUsageDescription": "Marketplace may access your photos when you add them to a listing.",
-        "NSPhotoLibraryAddUsageDescription": "Marketplace may save photos when you use listing features."
+        "NSPhotoLibraryAddUsageDescription": "Marketplace may save photos when you use listing features.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -36,7 +37,10 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "marketplaceBaseUrl": "https://www.facebook.com/marketplace/"
+      "marketplaceBaseUrl": "https://www.facebook.com/marketplace/",
+      "eas": {
+        "projectId": "23612e3c-be5a-4094-83a5-748e526d058b"
+      }
     },
     "plugins": [
       "expo-web-browser",
@@ -50,6 +54,7 @@
           "imageWidth": 180
         }
       ]
-    ]
+    ],
+    "owner": "bradengarrett"
   }
 }

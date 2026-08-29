@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   classifyUrl,
+  isExplicitNewsFeedUrl,
   isFacebookHost,
   shouldAllowInWebView,
 } from './urlValidator.ts';
@@ -51,6 +52,24 @@ describe('classifyUrl', () => {
     assert.equal(classifyUrl('https://www.facebook.com/').kind, 'facebookHome');
     assert.equal(classifyUrl('https://www.facebook.com/?sk=h_chr').kind, 'facebookHome');
     assert.equal(classifyUrl('https://m.facebook.com/home.php').kind, 'facebookHome');
+    assert.equal(classifyUrl('https://www.facebook.com/search/top/?q=bikes').kind, 'facebookHome');
+  });
+
+  it('treats only unambiguous news-feed URLs as explicit home, not listing photo hops', () => {
+    assert.equal(isExplicitNewsFeedUrl('https://www.facebook.com/?sk=h_chr'), true);
+    assert.equal(isExplicitNewsFeedUrl('https://m.facebook.com/home.php'), true);
+    assert.equal(isExplicitNewsFeedUrl('https://www.facebook.com/'), false);
+    assert.equal(isExplicitNewsFeedUrl('https://www.facebook.com/?fbid=123'), false);
+    assert.equal(isExplicitNewsFeedUrl('https://www.facebook.com/photo/?fbid=123'), false);
+  });
+
+  it('allows listing photo viewers so expanding a picture does not leave Marketplace', () => {
+    assert.equal(classifyUrl('https://www.facebook.com/photo/?fbid=123').kind, 'facebookRelated');
+    assert.equal(classifyUrl('https://www.facebook.com/photo.php?fbid=123').kind, 'facebookRelated');
+    assert.equal(classifyUrl('https://www.facebook.com/?fbid=123&set=a.456').kind, 'facebookRelated');
+    assert.equal(classifyUrl('https://www.facebook.com/?story_fbid=123').kind, 'facebookRelated');
+    assert.equal(classifyUrl('https://www.facebook.com/photo/?fbid=123&set=gm.456').kind, 'facebookRelated');
+    assert.equal(classifyUrl('https://www.facebook.com/marketplace/item/123/').kind, 'marketplace');
   });
 
   it('blocks Feed destinations without using substring host checks', () => {

@@ -4,10 +4,12 @@ import type {
   ShouldStartLoadRequest,
   WebViewErrorEvent,
   WebViewHttpErrorEvent,
+  WebViewMessageEvent,
   WebViewNavigation,
   WebViewOpenWindowEvent,
 } from 'react-native-webview/lib/WebViewTypes';
 import { CHROME_USER_AGENT_ANDROID, SAFARI_USER_AGENT_IOS } from '../constants';
+import { FACEBOOK_CHROME_ISOLATION_SCRIPT } from '../services/facebookChrome';
 import { forwardRef } from 'react';
 
 type Props = {
@@ -18,6 +20,7 @@ type Props = {
   onNavigationStateChange: (state: WebViewNavigation) => void;
   onLoadProgress: (progress: number) => void;
   onLoadEnd: () => void;
+  onMessage?: (event: WebViewMessageEvent) => void;
   onError: (event: WebViewErrorEvent) => void;
   onHttpError: (event: WebViewHttpErrorEvent) => void;
   onProcessGone: () => void;
@@ -33,6 +36,7 @@ export const MarketplaceWebView = forwardRef<WebView, Props>(function Marketplac
     onNavigationStateChange,
     onLoadProgress,
     onLoadEnd,
+    onMessage,
     onError,
     onHttpError,
     onProcessGone,
@@ -53,8 +57,10 @@ export const MarketplaceWebView = forwardRef<WebView, Props>(function Marketplac
       incognito={false}
       javaScriptEnabled
       domStorageEnabled
+      injectedJavaScriptBeforeContentLoaded={FACEBOOK_CHROME_ISOLATION_SCRIPT}
+      injectedJavaScript={FACEBOOK_CHROME_ISOLATION_SCRIPT}
       setSupportMultipleWindows
-      allowsBackForwardNavigationGestures
+      allowsBackForwardNavigationGestures={false}
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction={false}
       startInLoadingState={false}
@@ -63,6 +69,7 @@ export const MarketplaceWebView = forwardRef<WebView, Props>(function Marketplac
       onNavigationStateChange={onNavigationStateChange}
       onLoadProgress={(event) => onLoadProgress(event.nativeEvent.progress)}
       onLoadEnd={onLoadEnd}
+      onMessage={onMessage}
       onError={onError}
       onHttpError={onHttpError}
       onContentProcessDidTerminate={onProcessGone}

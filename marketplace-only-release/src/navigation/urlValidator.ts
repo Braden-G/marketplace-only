@@ -119,6 +119,65 @@ export function isFacebookHomePath(path: string): boolean {
   return path === '/' || path === '' || path === '/home.php' || path === '/index.php';
 }
 
+/**
+ * True only for unambiguous news-feed destinations.
+ * Bare `/` is not included: Marketplace listing photos often open there first.
+ */
+export function isExplicitNewsFeedUrl(rawUrl: string): boolean {
+  if (isFacebookPhotoViewer(rawUrl)) {
+    return false;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  const path = (parsed.pathname || '/').toLowerCase();
+  if (path === '/home.php' || path === '/index.php') {
+    return true;
+  }
+  const sk = parsed.searchParams.get('sk') ?? '';
+  return sk === 'h_chr' || sk === 'h_nor' || sk === 'h_eng';
+}
+
+export function isFacebookPhotoViewer(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  const path = (parsed.pathname || '/').toLowerCase();
+  if (
+    pathStartsWith(path, '/photo') ||
+    pathStartsWith(path, '/photos') ||
+    pathStartsWith(path, '/media')
+  ) {
+    return true;
+  }
+  const file = firstPathSegment(path);
+  if (file === 'photo.php' || file === 'photos.php' || file === 'permalink.php') {
+    return true;
+  }
+  const params = parsed.searchParams;
+  if (
+    params.has('fbid') ||
+    params.has('photo_id') ||
+    params.has('story_fbid') ||
+    params.has('theater')
+  ) {
+    return true;
+  }
+  const set = params.get('set') ?? '';
+  return (
+    set.startsWith('a.') ||
+    set.startsWith('pcb.') ||
+    set.startsWith('p.') ||
+    set.startsWith('gm.')
+  );
+}
+
 export function classifyUrl(rawUrl: string): Classification {
   const empty: Classification = {
     kind: 'ignore',
@@ -182,7 +241,11 @@ export function classifyUrl(rawUrl: string): Classification {
     return { kind: 'facebookBlocked', url: rawUrl, host, path };
   }
 
-  if (isFacebookHomePath(path)) {
+  if (isFacebookPhotoViewer(rawUrl)) {
+    return { kind: 'facebookRelated', url: rawUrl, host, path };
+  }
+
+  if (isFacebookHomePath(path) || pathStartsWith(path, '/search')) {
     return { kind: 'facebookHome', url: rawUrl, host, path };
   }
 
