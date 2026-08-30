@@ -9,6 +9,9 @@ import {
   marketplaceLandingUrl,
   marketplaceSearchNavigationScript,
   queryFromMarketplaceUrl,
+  SEARCH_NAVIGATION_GRACE_MS,
+  shouldAllowTransientFacebookHomeHop,
+  webViewAssignScript,
 } from './marketplaceUrlBuilder.ts';
 
 describe('buildMarketplaceSearchUrl', () => {
@@ -115,9 +118,82 @@ describe('marketplaceLandingUrl', () => {
 describe('marketplaceSearchNavigationScript', () => {
   it('navigates to the city search URL when a slug is already known', () => {
     const script = marketplaceSearchNavigationScript('mountain bikes', 'austin');
-    assert.match(script, /marketplace\/' \+ slug \+ '\/search\//);
+    assert.match(script, /marketplace\/' \+ city \+ '\/search\//);
     assert.match(script, /"mountain bikes"/);
     assert.match(script, /"austin"/);
+    assert.match(script, /__mpOnlySearchUntil/);
+    assert.match(script, /__mpOnlySlug/);
+    assert.match(script, /\/marketplace\/search\/\?query=/);
+  });
+
+  it('always falls back to a Marketplace search URL when no city or search field is found', () => {
+    const script = marketplaceSearchNavigationScript('tools', null);
+    assert.match(script, /go\(searchUrl\(null\)\)/);
+    assert.doesNotMatch(script, /location\.assign\('https:\/\/www\.facebook\.com\/marketplace\/' \+ slug/);
+  });
+});
+
+describe('shouldAllowTransientFacebookHomeHop', () => {
+  it('allows a bare Facebook home hop while a search is in flight', () => {
+    assert.equal(
+      shouldAllowTransientFacebookHomeHop({
+        currentUrl: 'https://www.facebook.com/marketplace/austin/',
+        targetUrl: 'https://www.facebook.com/',
+        now: 1_000,
+        searchUntil: 5_000,
+      }),
+      true,
+    );
+  });
+
+  it('allows a bare Facebook home hop from a listing or search page after the grace period', () => {
+    assert.equal(
+      shouldAllowTransientFacebookHomeHop({
+        currentUrl: 'https://www.facebook.com/marketplace/item/123/',
+        targetUrl: 'https://www.facebook.com/',
+        now: 9_000,
+        searchUntil: 5_000,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldAllowTransientFacebookHomeHop({
+        currentUrl: 'https://www.facebook.com/marketplace/austin/search/?query=bike',
+        targetUrl: 'https://www.facebook.com/',
+        now: 9_000,
+        searchUntil: 5_000,
+      }),
+      true,
+    );
+  });
+
+  it('blocks Facebook global search and browse-to-home after the grace period', () => {
+    assert.equal(
+      shouldAllowTransientFacebookHomeHop({
+        currentUrl: 'https://www.facebook.com/marketplace/austin/',
+        targetUrl: 'https://www.facebook.com/search/top/?q=bike',
+        now: 1_000,
+        searchUntil: 5_000,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldAllowTransientFacebookHomeHop({
+        currentUrl: 'https://www.facebook.com/marketplace/austin/',
+        targetUrl: 'https://www.facebook.com/',
+        now: 9_000,
+        searchUntil: 5_000,
+      }),
+      false,
+    );
+  });
+});
+
+describe('webViewAssignScript', () => {
+  it('assigns the URL inside the live WebView', () => {
+    const script = webViewAssignScript('https://www.facebook.com/marketplace/austin/search/?query=tools');
+    assert.match(script, /location\.assign\("https:\/\/www\.facebook\.com\/marketplace\/austin\/search\/\?query=tools"\)/);
+    assert.equal(SEARCH_NAVIGATION_GRACE_MS, 8000);
   });
 });
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  FACEBOOK_CHROME_ISOLATION_SCRIPT,
   isAppPromoDismissText,
   isAppPromoText,
   isAppStoreOrFacebookAppHref,
@@ -69,6 +70,12 @@ describe('shouldHideAsGlobalFacebookChrome', () => {
     assert.equal(isMessagesNavLabel('Messenger, 3 unread'), true);
     assert.equal(isMessagesNavLabel('Message seller'), false);
     assert.equal(isMessagesNavPath('/messages/t/1'), true);
+  });
+});
+
+describe('FACEBOOK_CHROME_ISOLATION_SCRIPT', () => {
+  it('does not bounce to Marketplace home while a search navigation is in flight', () => {
+    assert.match(FACEBOOK_CHROME_ISOLATION_SCRIPT, /__mpOnlySearchUntil/);
   });
 });
 

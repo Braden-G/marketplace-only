@@ -275,6 +275,9 @@ export const FACEBOOK_CHROME_ISOLATION_SCRIPT = `(function () {
 
     function bounceIfNewsFeed() {
       rememberLanding();
+      if (Date.now() < (window.__mpOnlySearchUntil || 0)) {
+        return;
+      }
       if (isPhotoTheaterOpen()) {
         window.__mpOnlyPhotoUntil = Date.now() + 4000;
         return;
