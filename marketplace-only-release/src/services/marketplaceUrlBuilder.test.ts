@@ -7,7 +7,6 @@ import {
   isMarketplaceSearchUrl,
   locationSlugFromMarketplaceUrl,
   marketplaceLandingUrl,
-  marketplaceSearchNavigationScript,
   queryFromMarketplaceUrl,
   SEARCH_NAVIGATION_GRACE_MS,
   shouldAllowTransientFacebookHomeHop,
@@ -30,6 +29,7 @@ describe('buildMarketplaceSearchUrl', () => {
 
   it('omits empty queries and only adds observed price params when provided', () => {
     const empty = new URL(buildMarketplaceSearchUrl('  ', { locationSlug: 'austin' }));
+    assert.equal(empty.pathname, '/marketplace/austin/search/');
     assert.equal(empty.searchParams.get('query'), null);
 
     const priced = new URL(buildMarketplaceSearchUrl('tools', { locationSlug: 'austin', minPrice: '10', maxPrice: '200' }));
@@ -112,24 +112,6 @@ describe('marketplaceLandingUrl', () => {
       'https://www.facebook.com/marketplace/',
     );
     assert.equal(marketplaceLandingUrl(), 'https://www.facebook.com/marketplace/');
-  });
-});
-
-describe('marketplaceSearchNavigationScript', () => {
-  it('navigates to the city search URL when a slug is already known', () => {
-    const script = marketplaceSearchNavigationScript('mountain bikes', 'austin');
-    assert.match(script, /marketplace\/' \+ city \+ '\/search\//);
-    assert.match(script, /"mountain bikes"/);
-    assert.match(script, /"austin"/);
-    assert.match(script, /__mpOnlySearchUntil/);
-    assert.match(script, /__mpOnlySlug/);
-    assert.match(script, /\/marketplace\/search\/\?query=/);
-  });
-
-  it('always falls back to a Marketplace search URL when no city or search field is found', () => {
-    const script = marketplaceSearchNavigationScript('tools', null);
-    assert.match(script, /go\(searchUrl\(null\)\)/);
-    assert.doesNotMatch(script, /location\.assign\('https:\/\/www\.facebook\.com\/marketplace\/' \+ slug/);
   });
 });
 

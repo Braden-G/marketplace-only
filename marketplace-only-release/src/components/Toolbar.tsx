@@ -58,7 +58,7 @@ export function Toolbar({
       <ToolButton label="‹" accessibilityLabel="Back" disabled={!canGoBack} theme={theme} onPress={onBack} />
       <ToolButton label="›" accessibilityLabel="Forward" disabled={!canGoForward} theme={theme} onPress={onForward} />
       <ToolButton label="⌂" accessibilityLabel="Marketplace home" theme={theme} onPress={onHome} />
-      <ToolButton label="⌕" accessibilityLabel="Searches" theme={theme} onPress={onSearch} />
+      <ToolButton label="⌕" accessibilityLabel="Search" theme={theme} onPress={onSearch} />
       <ToolButton label="↻" accessibilityLabel="Reload" theme={theme} onPress={onReload} />
       <ToolButton label="⚙" accessibilityLabel="Settings" theme={theme} onPress={onSettings} />
     </View>

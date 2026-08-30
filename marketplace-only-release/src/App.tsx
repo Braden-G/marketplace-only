@@ -22,12 +22,10 @@ import type {
 } from 'react-native-webview/lib/WebViewTypes';
 import { DiagnosticsOverlay, MessageOverlay } from './components/Overlays';
 import { MarketplaceWebView } from './components/MarketplaceWebView';
-import { SearchSheet } from './components/SearchSheet';
 import { SettingsScreen } from './components/SettingsScreen';
 import { Toolbar } from './components/Toolbar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { MARKETPLACE_HOME } from './constants';
-import { createMarketplaceSearch, MarketplaceSearch } from './models/MarketplaceSearch';
 import { classifyUrl, isExplicitNewsFeedUrl, isFacebookPhotoViewer, shouldAllowInWebView } from './navigation/urlValidator';
 import { getLogEntries, logNavigation, subscribeToLogs } from './services/logger';
 import {
@@ -36,20 +34,11 @@ import {
   isMarketplaceSearchUrl,
   locationSlugFromMarketplaceUrl,
   marketplaceLandingUrl,
-  marketplaceSearchNavigationScript,
-  queryFromMarketplaceUrl,
   SEARCH_NAVIGATION_GRACE_MS,
   shouldAllowTransientFacebookHomeHop,
   webViewAssignScript,
 } from './services/marketplaceUrlBuilder';
 import { clearFacebookWebsiteData } from './services/websiteData';
-import {
-  addRecentSearch,
-  loadRecentSearches,
-  loadSavedSearches,
-  removeSavedSearch,
-  saveSearch,
-} from './storage/searchStore';
 import { loadLocationSlug, saveLocationSlug } from './storage/locationSlug';
 import { AppearanceSetting, AppSettings, loadSettings, saveSettings } from './storage/settings';
 import { getTheme, resolveScheme } from './theme';
@@ -71,20 +60,15 @@ export default function App() {
   const [currentKind, setCurrentKind] = useState('marketplace');
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false, loading: true, progress: 0 });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [errorKind, setErrorKind] = useState<ErrorKind>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [discoveredHosts, setDiscoveredHosts] = useState<string[]>([]);
   const [logs, setLogs] = useState(getLogEntries());
   const [online, setOnline] = useState(true);
-  const [savedSearches, setSavedSearches] = useState<MarketplaceSearch[]>([]);
-  const [recentSearches, setRecentSearches] = useState<MarketplaceSearch[]>([]);
 
   useEffect(() => {
     loadSettings().then(setSettings);
-    loadSavedSearches().then(setSavedSearches);
-    loadRecentSearches().then(setRecentSearches);
     loadLocationSlug().then((slug) => {
       if (slug) {
         locationSlugRef.current = slug;
@@ -224,16 +208,6 @@ export default function App() {
       rememberSlug(url);
       lastMarketplaceUrl.current = url;
       pushMarketplaceHistory(url);
-      if (!isMarketplaceSearchUrl(url)) {
-        return;
-      }
-      const query = queryFromMarketplaceUrl(url);
-      const search = createMarketplaceSearch({
-        name: query || 'Marketplace search',
-        query,
-        url,
-      });
-      setRecentSearches(await addRecentSearch(search));
     },
     [pushMarketplaceHistory, rememberSlug],
   );
@@ -355,7 +329,12 @@ export default function App() {
 
   const injectLandingHint = useCallback(() => {
     const dest = cityLandingUrl(lastMarketplaceUrl.current);
-    webViewRef.current?.injectJavaScript(`window.__mpOnlyLanding=${JSON.stringify(dest)}; true;`);
+    const remaining = searchNavUntilRef.current - Date.now();
+    const searchGrace =
+      remaining > 0 ? `window.__mpOnlySearchUntil=Date.now()+${remaining};` : '';
+    webViewRef.current?.injectJavaScript(
+      `window.__mpOnlyLanding=${JSON.stringify(dest)};${searchGrace} true;`,
+    );
   }, [cityLandingUrl]);
 
   const onError = useCallback((event: WebViewErrorEvent) => {
@@ -416,54 +395,20 @@ export default function App() {
     logNavigation(title, { kind: result.usedNativeModule ? 'native' : 'fallback' });
   }, [loadUrl]);
 
-  const openSearch = useCallback((search: MarketplaceSearch) => {
-    setSearchOpen(false);
+  const openMarketplaceSearch = useCallback(() => {
     const slug =
-      locationSlugFromMarketplaceUrl(search.url) ??
       locationSlugFromMarketplaceUrl(currentUrl) ??
       locationSlugFromMarketplaceUrl(lastMarketplaceUrl.current) ??
       locationSlugRef.current;
-    if (search.query) {
-      searchNavUntilRef.current = Date.now() + SEARCH_NAVIGATION_GRACE_MS;
-      const url = buildMarketplaceSearchUrl(search.query, slug ? { locationSlug: slug } : undefined);
-      pushMarketplaceHistory(url);
-      setSourceUri(url);
-      setBlocked(false);
-      setErrorKind(null);
-      webViewRef.current?.injectJavaScript(marketplaceSearchNavigationScript(search.query, slug));
-      addRecentSearch({ ...search, url }).then(setRecentSearches);
-      logNavigation('Open Marketplace search', { url, kind: 'marketplace' });
-      return;
-    }
-    pushMarketplaceHistory(search.url);
-    loadUrl(search.url, false);
-    addRecentSearch(search).then(setRecentSearches);
-    logNavigation('Open search shortcut', { url: search.url, kind: 'marketplace' });
+    const url = buildMarketplaceSearchUrl('', slug ? { locationSlug: slug } : undefined);
+    searchNavUntilRef.current = Date.now() + SEARCH_NAVIGATION_GRACE_MS;
+    webViewRef.current?.injectJavaScript(
+      `window.__mpOnlySearchUntil=Date.now()+${SEARCH_NAVIGATION_GRACE_MS};true;`,
+    );
+    pushMarketplaceHistory(url);
+    loadUrl(url, false);
+    logNavigation('Open Marketplace search', { url, kind: 'marketplace' });
   }, [currentUrl, loadUrl, pushMarketplaceHistory]);
-
-  const submitQuery = useCallback(
-    (query: string) => {
-      const url = buildMarketplaceSearchUrl(query);
-      const search = createMarketplaceSearch({ name: query, query, url });
-      openSearch(search);
-    },
-    [openSearch],
-  );
-
-  const saveCurrentPage = useCallback(
-    async (name: string) => {
-      if (classifyUrl(currentUrl).kind !== 'marketplace') {
-        return;
-      }
-      const search = createMarketplaceSearch({
-        name,
-        query: queryFromMarketplaceUrl(currentUrl),
-        url: currentUrl,
-      });
-      setSavedSearches(await saveSearch(search));
-    },
-    [currentUrl],
-  );
 
   if (!settings) {
     return (
@@ -481,8 +426,6 @@ export default function App() {
       </SafeAreaView>
     );
   }
-
-  const canSaveCurrent = classifyUrl(currentUrl).kind === 'marketplace';
 
   return (
     <SafeAreaView style={[styles.flex, { backgroundColor: theme.chrome }]} edges={['top', 'bottom']}>
@@ -613,25 +556,9 @@ export default function App() {
         onBack={goBackMarketplace}
         onForward={() => webViewRef.current?.goForward()}
         onHome={loadMarketplaceHome}
-        onSearch={() => setSearchOpen(true)}
+        onSearch={openMarketplaceSearch}
         onReload={() => webViewRef.current?.reload()}
         onSettings={() => setSettingsOpen(true)}
-      />
-
-      <SearchSheet
-        visible={searchOpen}
-        theme={theme}
-        currentUrl={currentUrl}
-        saved={savedSearches}
-        recents={recentSearches}
-        canSaveCurrent={canSaveCurrent}
-        onClose={() => setSearchOpen(false)}
-        onOpenSearch={openSearch}
-        onSaveCurrent={saveCurrentPage}
-        onSubmitQuery={submitQuery}
-        onDeleteSaved={(id) => {
-          removeSavedSearch(id).then(setSavedSearches);
-        }}
       />
 
       <SettingsScreen
