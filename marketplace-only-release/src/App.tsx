@@ -33,12 +33,14 @@ import { getLogEntries, logNavigation, subscribeToLogs } from './services/logger
 import {
   buildMarketplaceSearchUrl,
   isBareMarketplaceHome,
-  isMarketplaceItemUrl,
   isMarketplaceSearchUrl,
   locationSlugFromMarketplaceUrl,
   marketplaceLandingUrl,
   marketplaceSearchNavigationScript,
   queryFromMarketplaceUrl,
+  SEARCH_NAVIGATION_GRACE_MS,
+  shouldAllowTransientFacebookHomeHop,
+  webViewAssignScript,
 } from './services/marketplaceUrlBuilder';
 import { clearFacebookWebsiteData } from './services/websiteData';
 import {
@@ -61,6 +63,7 @@ export default function App() {
   const marketplaceStack = useRef<string[]>([MARKETPLACE_HOME]);
   const currentUrlRef = useRef(MARKETPLACE_HOME);
   const locationSlugRef = useRef<string | null>(null);
+  const searchNavUntilRef = useRef(0);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [sourceUri, setSourceUri] = useState(MARKETPLACE_HOME);
   const [webKey, setWebKey] = useState(0);
@@ -141,10 +144,13 @@ export default function App() {
   const loadUrl = useCallback((url: string, remount = false) => {
     setBlocked(false);
     setErrorKind(null);
+    setSourceUri(url);
     if (remount) {
       setWebKey((value) => value + 1);
+      return;
     }
-    setSourceUri(url);
+    // Preview/release WKWebView often ignores a source.uri change without a remount.
+    webViewRef.current?.injectJavaScript(webViewAssignScript(url));
   }, []);
 
   const setMarketplaceStack = useCallback((stack: string[]) => {
@@ -258,8 +264,14 @@ export default function App() {
           logNavigation('Stay in Marketplace (Facebook home blocked)', { url: rawUrl, kind: result.kind });
           return false;
         }
-        // Bare `/` from a listing or search is usually the photo theater's first hop.
-        if (isMarketplaceItemUrl(currentUrlRef.current) || isMarketplaceSearchUrl(currentUrlRef.current)) {
+        // Bare `/` from a listing, search, or an in-flight search is usually a Facebook SPA hop.
+        if (
+          shouldAllowTransientFacebookHomeHop({
+            currentUrl: currentUrlRef.current,
+            targetUrl: rawUrl,
+            searchUntil: searchNavUntilRef.current,
+          })
+        ) {
           setCurrentKind('facebookRelated');
           setBlocked(false);
           return true;
@@ -411,18 +423,16 @@ export default function App() {
       locationSlugFromMarketplaceUrl(currentUrl) ??
       locationSlugFromMarketplaceUrl(lastMarketplaceUrl.current) ??
       locationSlugRef.current;
-    if (search.query && slug) {
-      const url = buildMarketplaceSearchUrl(search.query, { locationSlug: slug });
+    if (search.query) {
+      searchNavUntilRef.current = Date.now() + SEARCH_NAVIGATION_GRACE_MS;
+      const url = buildMarketplaceSearchUrl(search.query, slug ? { locationSlug: slug } : undefined);
       pushMarketplaceHistory(url);
-      loadUrl(url, false);
+      setSourceUri(url);
+      setBlocked(false);
+      setErrorKind(null);
+      webViewRef.current?.injectJavaScript(marketplaceSearchNavigationScript(search.query, slug));
       addRecentSearch({ ...search, url }).then(setRecentSearches);
       logNavigation('Open Marketplace search', { url, kind: 'marketplace' });
-      return;
-    }
-    if (search.query) {
-      webViewRef.current?.injectJavaScript(marketplaceSearchNavigationScript(search.query, slug));
-      addRecentSearch(search).then(setRecentSearches);
-      logNavigation('Open Marketplace search in page', { kind: 'marketplace' });
       return;
     }
     pushMarketplaceHistory(search.url);
